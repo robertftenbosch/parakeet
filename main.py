@@ -1,3 +1,4 @@
+import argparse
 import inspect
 import json
 import os
@@ -5,11 +6,111 @@ import os
 from ollama import Client
 from dotenv import load_dotenv
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Optional
 
 load_dotenv()
 
-ollama_client = Client(host=os.environ.get("OLLAMA_HOST", "http://localhost:11434"))
+CONFIG_DIR = Path.home() / ".parakeet"
+CONFIG_FILE = CONFIG_DIR / "config.json"
+
+
+def load_config() -> Dict[str, str]:
+    """Load config from ~/.parakeet/config.json or return empty dict."""
+    if CONFIG_FILE.exists():
+        try:
+            return json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, IOError):
+            return {}
+    return {}
+
+
+def save_config(config: Dict[str, str]) -> None:
+    """Save config to ~/.parakeet/config.json."""
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    CONFIG_FILE.write_text(json.dumps(config, indent=2), encoding="utf-8")
+
+
+def list_available_models(client: Client) -> List[str]:
+    """Get list of available models from Ollama."""
+    try:
+        response = client.list()
+        return [model['name'] for model in response.get('models', [])]
+    except Exception as e:
+        print(f"Error fetching models: {e}")
+        return []
+
+
+def select_model_interactive(client: Client) -> Optional[str]:
+    """Show available models and let user select one."""
+    models = list_available_models(client)
+    if not models:
+        print("No models found. Please pull a model first: ollama pull <model>")
+        return None
+
+    print("\nAvailable models:")
+    for i, model in enumerate(models, 1):
+        print(f"  {i}. {model}")
+
+    while True:
+        try:
+            choice = input("\nSelect model number: ").strip()
+            idx = int(choice) - 1
+            if 0 <= idx < len(models):
+                return models[idx]
+            print(f"Please enter a number between 1 and {len(models)}")
+        except ValueError:
+            print("Please enter a valid number")
+        except (KeyboardInterrupt, EOFError):
+            return None
+
+
+def get_ollama_config(args: argparse.Namespace) -> Tuple[str, str]:
+    """
+    Determine Ollama host and model based on priority:
+    1. CLI arguments
+    2. Config file
+    3. Environment variables
+    4. Interactive prompt (and save to config)
+    """
+    config = load_config()
+
+    # Determine host
+    host = (
+        args.host or
+        config.get("ollama_host") or
+        os.environ.get("OLLAMA_HOST") or
+        "http://localhost:11434"
+    )
+
+    # Create client to check connection / list models
+    client = Client(host=host)
+
+    # Determine model
+    model = args.model or config.get("ollama_model") or os.environ.get("OLLAMA_MODEL")
+
+    if not model:
+        print(f"Connected to Ollama at: {host}")
+        model = select_model_interactive(client)
+        if not model:
+            model = "llama3.2"  # fallback default
+
+    # Save to config if changed
+    if host != config.get("ollama_host") or model != config.get("ollama_model"):
+        config["ollama_host"] = host
+        config["ollama_model"] = model
+        save_config(config)
+        print(f"Configuration saved to {CONFIG_FILE}")
+
+    return host, model
+
+
+def parse_args() -> argparse.Namespace:
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(description="AI coding agent using Ollama")
+    parser.add_argument("--host", help="Ollama server URL")
+    parser.add_argument("--model", help="Model name to use")
+    return parser.parse_args()
+
 
 SYSTEM_PROMPT = """
 You are a coding assistant whose goal it is to help us solve coding tasks.
@@ -117,7 +218,7 @@ def get_full_system_prompt():
     tool_str_repr = ""
     for tool_name in TOOL_REGISTRY:
         tool_str_repr += "TOOL\n===" + get_tool_str_representation(tool_name)
-        tool_str_repr += f"\n{"="*15}\n"
+        tool_str_repr += f"\n{'='*15}\n"
     return SYSTEM_PROMPT.format(tool_list_repr=tool_str_repr)
 
 def extract_tool_invocations(text: str) -> List[Tuple[str, Dict[str, Any]]]:
@@ -143,15 +244,16 @@ def extract_tool_invocations(text: str) -> List[Tuple[str, Dict[str, Any]]]:
             continue
     return invocations
 
-def execute_llm_call(conversation: List[Dict[str, str]]):
-    model = os.environ.get("OLLAMA_MODEL", "llama3.2")
-    response = ollama_client.chat(
+def execute_llm_call(client: Client, model: str, conversation: List[Dict[str, str]]):
+    response = client.chat(
         model=model,
         messages=conversation,
     )
     return response['message']['content']
 
-def run_coding_agent_loop():
+
+def run_coding_agent_loop(client: Client, model: str):
+    print(f"Using model: {model}")
     print(get_full_system_prompt())
     conversation = [{
         "role": "system",
@@ -167,7 +269,7 @@ def run_coding_agent_loop():
             "content": user_input.strip()
         })
         while True:
-            assistant_response = execute_llm_call(conversation)
+            assistant_response = execute_llm_call(client, model, conversation)
             tool_invocations = extract_tool_invocations(assistant_response)
             if not tool_invocations:
                 print(f"{ASSISTANT_COLOR}Assistant:{RESET_COLOR}: {assistant_response}")
@@ -192,7 +294,10 @@ def run_coding_agent_loop():
                     "role": "user",
                     "content": f"tool_result({json.dumps(resp)})"
                 })
-               
+
 
 if __name__ == "__main__":
-    run_coding_agent_loop()
+    args = parse_args()
+    host, model = get_ollama_config(args)
+    client = Client(host=host)
+    run_coding_agent_loop(client, model)
