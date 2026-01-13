@@ -5,7 +5,8 @@ from typing import Any
 
 from ollama import Client
 
-from ..ui import console, print_assistant, print_tool, thinking_spinner
+from ..ui import console, print_tool, thinking_spinner
+from .config import load_project_context
 from .tools import TOOLS, TOOL_REGISTRY, DANGEROUS_TOOLS
 
 SYSTEM_PROMPT = """You are a coding assistant specialized in biotech and robotics applications.
@@ -49,6 +50,17 @@ You have access to tools for file operations and code execution. Use them when n
 """
 
 
+def build_system_prompt() -> str:
+    """Build system prompt with optional project context."""
+    prompt = SYSTEM_PROMPT
+
+    project_context = load_project_context()
+    if project_context:
+        prompt += f"\n\n## Project Context\n\n{project_context}"
+
+    return prompt
+
+
 def confirm_execution(tool_name: str, content: str) -> bool:
     """Ask user to confirm before executing code."""
     console.print(f"\n[bold red]Warning:[/] {tool_name} wants to execute:")
@@ -62,14 +74,35 @@ def confirm_execution(tool_name: str, content: str) -> bool:
         return False
 
 
-def execute_llm_call(client: Client, model: str, conversation: list[dict[str, Any]], tools: list):
-    """Execute LLM call with native tool support."""
-    response = client.chat(
+def stream_response(client: Client, model: str, conversation: list[dict[str, Any]], tools: list):
+    """Stream LLM response and collect content/tool calls."""
+    full_content = ""
+    tool_calls = []
+    first_chunk = True
+
+    for chunk in client.chat(
         model=model,
         messages=conversation,
         tools=tools,
-    )
-    return response
+        stream=True,
+    ):
+        # Handle content streaming
+        if chunk.message.content:
+            if first_chunk:
+                console.print("[bold blue]Assistant:[/] ", end="")
+                first_chunk = False
+            console.print(chunk.message.content, end="", highlight=False)
+            full_content += chunk.message.content
+
+        # Collect tool calls
+        if chunk.message.tool_calls:
+            tool_calls.extend(chunk.message.tool_calls)
+
+    # Print newline if we streamed content
+    if full_content:
+        console.print()
+
+    return full_content, tool_calls
 
 
 def run_agent_loop(client: Client, model: str) -> None:
@@ -77,13 +110,20 @@ def run_agent_loop(client: Client, model: str) -> None:
     console.print(f"[bold green]Parakeet[/] v0.1.0")
     console.print(f"[dim]Model:[/] {model}")
     console.print(f"[dim]Tools:[/] {', '.join(t.__name__ for t in TOOLS)}")
+
+    # Check for project context
+    project_context = load_project_context()
+    if project_context:
+        console.print(f"[dim]Project:[/] .parakeet/context.md loaded")
+
     console.print()
     console.print("[dim]Type your message or Ctrl+C to exit[/]")
     console.print()
 
+    system_prompt = build_system_prompt()
     conversation = [{
         "role": "system",
-        "content": SYSTEM_PROMPT
+        "content": system_prompt
     }]
 
     while True:
@@ -103,21 +143,19 @@ def run_agent_loop(client: Client, model: str) -> None:
 
         # Agent loop - keep processing until no more tool calls
         while True:
-            with thinking_spinner("Thinking..."):
-                response = execute_llm_call(client, model, conversation, TOOLS)
-
-            message = response.message
+            # Stream response
+            content, tool_calls = stream_response(client, model, conversation, TOOLS)
 
             # Check if there are tool calls
-            if message.tool_calls:
+            if tool_calls:
                 # Add assistant message with tool calls to conversation
                 conversation.append({
                     "role": "assistant",
-                    "content": message.content or "",
-                    "tool_calls": message.tool_calls
+                    "content": content,
+                    "tool_calls": tool_calls
                 })
 
-                for tool_call in message.tool_calls:
+                for tool_call in tool_calls:
                     tool_name = tool_call.function.name
                     tool_args = tool_call.function.arguments
 
@@ -130,13 +168,14 @@ def run_agent_loop(client: Client, model: str) -> None:
                         if tool_name in DANGEROUS_TOOLS:
                             # Format the content for confirmation
                             if tool_name == "run_bash_tool":
-                                content = tool_args.get("command", "")
+                                confirm_content = tool_args.get("command", "")
                             else:  # run_python_tool
-                                content = tool_args.get("code", "")
+                                confirm_content = tool_args.get("code", "")
 
-                            if confirm_execution(tool_name, content):
-                                func = TOOL_REGISTRY[tool_name]
-                                result = func(**tool_args)
+                            if confirm_execution(tool_name, confirm_content):
+                                with thinking_spinner("Executing..."):
+                                    func = TOOL_REGISTRY[tool_name]
+                                    result = func(**tool_args)
                             else:
                                 result = {"status": "cancelled", "message": "User cancelled execution"}
                         else:
@@ -149,11 +188,9 @@ def run_agent_loop(client: Client, model: str) -> None:
                         "content": json.dumps(result)
                     })
             else:
-                # No tool calls - print response and break
-                if message.content:
-                    print_assistant(message.content)
+                # No tool calls - add to conversation and break
                 conversation.append({
                     "role": "assistant",
-                    "content": message.content or ""
+                    "content": content
                 })
                 break

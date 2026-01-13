@@ -24,6 +24,17 @@ def load_config() -> dict[str, str]:
     return {}
 
 
+def load_project_context() -> Optional[str]:
+    """Load project context from .parakeet/context.md if it exists."""
+    context_file = Path.cwd() / ".parakeet" / "context.md"
+    if context_file.exists():
+        try:
+            return context_file.read_text(encoding="utf-8")
+        except IOError:
+            return None
+    return None
+
+
 def save_config(config: dict[str, str]) -> None:
     """Save config to ~/.parakeet/config.json."""
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
