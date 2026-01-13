@@ -5,33 +5,47 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Build and Run Commands
 
 ```bash
-# Install dependencies
-uv sync
-
-# Run the agent
-uv run parakeet
-
-# Install globally (to ~/.local/bin)
-uv tool install .
+uv sync                 # Install dependencies
+uv run parakeet         # Run the agent
+uv run parakeet --help  # Show CLI help
+uv tool install .       # Install globally
 ```
-
-## Environment Configuration
-
-Copy `.env.example` to `.env` to customize:
-- `OLLAMA_HOST`: Ollama server URL (default: http://localhost:11434)
-- `OLLAMA_MODEL`: Model to use (default: llama3.2)
-
-Requires Ollama running locally with a model pulled (e.g., `ollama pull llama3.2`).
 
 ## Architecture
 
-This is a single-file coding agent (`main.py`) that uses Ollama for local LLM inference.
+```
+parakeet/
+├── main.py           # Typer CLI entry point
+├── cli/              # CLI commands
+│   ├── chat.py       # Chat command (default)
+│   ├── config_cmd.py # Config command
+│   └── init_cmd.py   # Init command
+├── core/             # Core logic
+│   ├── agent.py      # Agent loop + SYSTEM_PROMPT
+│   ├── config.py     # Config loading/saving
+│   └── tools.py      # Tool definitions (TOOLS, TOOL_REGISTRY)
+└── ui/               # Rich console components
+    ├── console.py    # Colored output, syntax highlighting
+    └── spinner.py    # Loading spinner
+```
 
-**Tool System**: Tools are registered in `TOOL_REGISTRY` dict mapping names to functions. Each tool function has a docstring used to generate the system prompt. Available tools:
-- `read_file`: Read file contents
-- `list_files`: List directory contents
-- `edit_file`: Replace strings in files or create new files
+## Key Components
 
-**Agent Loop** (`run_coding_agent_loop`): REPL that maintains conversation history and processes tool invocations. The LLM requests tools via `tool: TOOL_NAME({JSON_ARGS})` format, which `extract_tool_invocations` parses. Tool results are fed back as `tool_result(...)` messages.
+**Tools** (`core/tools.py`):
+- `TOOLS` list - Python functions passed to Ollama for native tool calling
+- `TOOL_REGISTRY` dict - Maps function names to functions
+- `DANGEROUS_TOOLS` set - Tools requiring user confirmation
 
-**Path Resolution**: `resolve_abs_path` converts relative paths to absolute using current working directory.
+**Agent Loop** (`core/agent.py`):
+- Uses native Ollama tool calling (`client.chat(tools=TOOLS)`)
+- Processes `response.message.tool_calls`
+- Shows spinner during LLM calls
+
+**CLI** (`main.py`):
+- Typer app with subcommands: `chat`, `config`, `init`
+- Default command is `chat`
+
+## Configuration
+
+- Global: `~/.parakeet/config.json`
+- Project: `.parakeet/context.md` (created by `parakeet init`)
