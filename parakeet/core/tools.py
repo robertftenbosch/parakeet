@@ -344,6 +344,101 @@ def install_deps_tool(path: str) -> dict[str, Any]:
 # Import bioinformatics tools
 from .bio_tools import kegg_tool, pdb_tool, uniprot_tool, ncbi_tool, ontology_tool, blast_tool
 
+# Import pathway analyzer
+from .pathway_analyzer import (
+    get_pathway_info,
+    get_pathway_enzymes,
+    compare_pathway_organisms,
+    find_alternative_enzymes,
+    analyze_nitrogen_fixation_pathway,
+    suggest_optimization_targets,
+)
+
+
+def analyze_pathway_tool(
+    pathway_id: str,
+    organism: Optional[str] = None,
+    analysis_type: str = "info"
+) -> dict[str, Any]:
+    """
+    Analyze a metabolic pathway from KEGG.
+
+    Args:
+        pathway_id: KEGG pathway ID (e.g., '00910' for nitrogen metabolism)
+        organism: Optional organism code (e.g., 'eco' for E. coli, 'avn' for Azotobacter)
+        analysis_type: Type of analysis - 'info', 'enzymes', 'optimization', or 'nitrogen'
+
+    Returns:
+        Dict with pathway analysis results
+    """
+    console.print(f"  [dim]Analyzing pathway:[/] {pathway_id}")
+
+    if analysis_type == "nitrogen":
+        org = organism or "avn"
+        return analyze_nitrogen_fixation_pathway(org)
+
+    # Build full pathway ID if organism is provided
+    full_id = f"{organism}{pathway_id}" if organism else pathway_id
+
+    if analysis_type == "info":
+        return get_pathway_info(full_id)
+    elif analysis_type == "enzymes":
+        return get_pathway_enzymes(full_id)
+    elif analysis_type == "optimization":
+        if not organism:
+            return {"error": "Organism code required for optimization analysis"}
+        return suggest_optimization_targets(pathway_id, organism)
+    else:
+        return {"error": f"Unknown analysis type: {analysis_type}"}
+
+
+def compare_organisms_tool(
+    pathway_id: str,
+    organism1: str,
+    organism2: str
+) -> dict[str, Any]:
+    """
+    Compare a metabolic pathway between two organisms.
+
+    Args:
+        pathway_id: KEGG pathway number (e.g., '00910')
+        organism1: First organism code (e.g., 'eco' for E. coli)
+        organism2: Second organism code (e.g., 'avn' for Azotobacter)
+
+    Returns:
+        Dict with comparison results including common and unique functions
+    """
+    console.print(f"  [dim]Comparing:[/] {organism1} vs {organism2} for pathway {pathway_id}")
+    return compare_pathway_organisms(pathway_id, organism1, organism2)
+
+
+def find_alternatives_tool(
+    ec_number: str,
+    source_organism: Optional[str] = None,
+    target_organisms: Optional[str] = None
+) -> dict[str, Any]:
+    """
+    Find alternative enzymes from different organisms.
+
+    Useful for finding enzymes with potentially better properties
+    for metabolic engineering.
+
+    Args:
+        ec_number: EC number of the enzyme (e.g., '1.18.6.1' for nitrogenase)
+        source_organism: Current organism to exclude from results
+        target_organisms: Comma-separated list of organisms to search in
+
+    Returns:
+        Dict with alternative enzymes from different organisms
+    """
+    console.print(f"  [dim]Finding alternatives for:[/] EC {ec_number}")
+
+    targets = None
+    if target_organisms:
+        targets = [t.strip() for t in target_organisms.split(",")]
+
+    return find_alternative_enzymes(ec_number, source_organism, targets)
+
 # Tools list for native Ollama tool calling
 TOOLS = [
     # File operations
@@ -366,6 +461,10 @@ TOOLS = [
     ncbi_tool,
     ontology_tool,
     blast_tool,
+    # Pathway analysis
+    analyze_pathway_tool,
+    compare_organisms_tool,
+    find_alternatives_tool,
 ]
 
 # Registry for looking up tools by name
@@ -385,6 +484,9 @@ TOOL_REGISTRY = {
     "ncbi_tool": ncbi_tool,
     "ontology_tool": ontology_tool,
     "blast_tool": blast_tool,
+    "analyze_pathway_tool": analyze_pathway_tool,
+    "compare_organisms_tool": compare_organisms_tool,
+    "find_alternatives_tool": find_alternatives_tool,
 }
 
 # Tools that require user confirmation before execution

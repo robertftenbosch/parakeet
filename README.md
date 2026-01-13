@@ -122,6 +122,13 @@ The agent has access to:
 | `ontology_tool` | Query biological ontologies (GO, CHEBI) |
 | `blast_tool` | Run BLAST sequence similarity searches |
 
+### Pathway Analysis
+| Tool | Description |
+|------|-------------|
+| `analyze_pathway_tool` | Analyze metabolic pathways (info, enzymes, optimization) |
+| `compare_organisms_tool` | Compare pathways between two organisms |
+| `find_alternatives_tool` | Find alternative enzymes from different organisms |
+
 ## Configuration
 
 Configuration is stored in `~/.parakeet/config.json`:

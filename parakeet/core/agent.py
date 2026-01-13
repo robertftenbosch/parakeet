@@ -37,6 +37,17 @@ You have direct access to major bioinformatics databases via tools:
   - Find homologous proteins/genes
   - Note: BLAST searches take 30-60 seconds
 
+### Pathway Analysis
+- **Pathway Analyzer** (analyze_pathway_tool): Analyze metabolic pathways
+  - Get pathway info, enzymes, optimization targets
+  - Specialized nitrogen fixation analysis
+- **Organism Comparison** (compare_organisms_tool): Compare pathways between organisms
+  - Find common and unique functions
+  - Identify potential gene candidates
+- **Enzyme Alternatives** (find_alternatives_tool): Find enzyme alternatives
+  - Discover enzymes from other organisms
+  - Useful for metabolic engineering optimization
+
 ### Bioinformatics - Programming
 - BioPython for sequence analysis (SeqIO, Seq, SeqRecord)
 - FASTA/FASTQ/GenBank file parsing

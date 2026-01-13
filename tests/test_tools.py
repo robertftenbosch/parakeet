@@ -377,4 +377,4 @@ class TestToolRegistry:
 
     def test_tool_count(self):
         assert len(TOOLS) == len(TOOL_REGISTRY)
-        assert len(TOOLS) == 15  # file ops (4) + sqlite + env (2) + exec (2) + bio (6)
+        assert len(TOOLS) == 18  # file ops (4) + sqlite + env (2) + exec (2) + bio (6) + pathway (3)
