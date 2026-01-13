@@ -2,14 +2,14 @@ import inspect
 import json
 import os
 
-from openai import OpenAI
+from ollama import Client
 from dotenv import load_dotenv
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 load_dotenv()
 
-openai_client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+ollama_client = Client(host=os.environ.get("OLLAMA_HOST", "http://localhost:11434"))
 
 SYSTEM_PROMPT = """
 You are a coding assistant whose goal it is to help us solve coding tasks.
@@ -144,12 +144,12 @@ def extract_tool_invocations(text: str) -> List[Tuple[str, Dict[str, Any]]]:
     return invocations
 
 def execute_llm_call(conversation: List[Dict[str, str]]):
-    response = openai_client.chat.completions.create(
-        model="gpt-5",
+    model = os.environ.get("OLLAMA_MODEL", "llama3.2")
+    response = ollama_client.chat(
+        model=model,
         messages=conversation,
-        max_completion_tokens=2000
     )
-    return response.choices[0].message.content
+    return response['message']['content']
 
 def run_coding_agent_loop():
     print(get_full_system_prompt())
