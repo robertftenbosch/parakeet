@@ -2,6 +2,8 @@ import argparse
 import inspect
 import json
 import os
+import subprocess
+import tempfile
 
 from ollama import Client
 from dotenv import load_dotenv
@@ -198,12 +200,100 @@ def edit_file_tool(path: str, old_str: str, new_str: str) -> Dict[str, Any]:
         "path": str(full_path),
         "action": "edited"
     }
-   
+
+
+CONFIRM_COLOR = "\u001b[91m"  # Red for warnings
+
+
+def confirm_execution(tool_name: str, content: str) -> bool:
+    """Ask user to confirm before executing code."""
+    print(f"\n{CONFIRM_COLOR}⚠️  {tool_name} wil uitvoeren:{RESET_COLOR}")
+    print(f"{'─'*50}")
+    print(content)
+    print(f"{'─'*50}")
+    try:
+        response = input(f"{CONFIRM_COLOR}Uitvoeren? [y/N]:{RESET_COLOR} ").strip().lower()
+        return response in ('y', 'yes', 'j', 'ja')
+    except (KeyboardInterrupt, EOFError):
+        return False
+
+
+def run_bash_tool(command: str) -> Dict[str, Any]:
+    """
+    Executes a bash command. Requires user confirmation.
+    :param command: The bash command to execute.
+    :return: stdout, stderr, and return code.
+    """
+    try:
+        result = subprocess.run(
+            command,
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            cwd=Path.cwd()
+        )
+        return {
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+            "return_code": result.returncode
+        }
+    except subprocess.TimeoutExpired:
+        return {
+            "error": "Command timed out after 60 seconds",
+            "return_code": -1
+        }
+    except Exception as e:
+        return {
+            "error": str(e),
+            "return_code": -1
+        }
+
+
+def run_python_tool(code: str) -> Dict[str, Any]:
+    """
+    Executes Python code. Requires user confirmation.
+    :param code: The Python code to execute.
+    :return: stdout, stderr, and return code.
+    """
+    try:
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            f.write(code)
+            temp_path = f.name
+
+        try:
+            result = subprocess.run(
+                ['python', temp_path],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                cwd=Path.cwd()
+            )
+            return {
+                "stdout": result.stdout,
+                "stderr": result.stderr,
+                "return_code": result.returncode
+            }
+        finally:
+            Path(temp_path).unlink(missing_ok=True)
+    except subprocess.TimeoutExpired:
+        return {
+            "error": "Python execution timed out after 60 seconds",
+            "return_code": -1
+        }
+    except Exception as e:
+        return {
+            "error": str(e),
+            "return_code": -1
+        }
+
 
 TOOL_REGISTRY = {
     "read_file": read_file_tool,
     "list_files": list_files_tool,
-    "edit_file": edit_file_tool
+    "edit_file": edit_file_tool,
+    "run_bash": run_bash_tool,
+    "run_python": run_python_tool,
 }
 
 def get_tool_str_representation(tool_name: str) -> str:
@@ -279,17 +369,32 @@ def run_coding_agent_loop(client: Client, model: str):
                 })
                 break
             for name, args in tool_invocations:
-                tool = TOOL_REGISTRY[name]
-                resp = ""
-                print(name, args)
-                if name == "read_file":
-                    resp = tool(args.get("filename", "."))
-                elif name == "list_files":
-                    resp = tool(args.get("path", "."))
-                elif name == "edit_file":
-                    resp = tool(args.get("path", "."),
-                                args.get("old_str", ""),
-                                args.get("new_str", ""))
+                if name not in TOOL_REGISTRY:
+                    resp = {"error": f"Unknown tool: {name}"}
+                else:
+                    tool = TOOL_REGISTRY[name]
+                    resp = ""
+                    print(name, args)
+                    if name == "read_file":
+                        resp = tool(args.get("filename", "."))
+                    elif name == "list_files":
+                        resp = tool(args.get("path", "."))
+                    elif name == "edit_file":
+                        resp = tool(args.get("path", "."),
+                                    args.get("old_str", ""),
+                                    args.get("new_str", ""))
+                    elif name == "run_bash":
+                        cmd = args.get("command", "")
+                        if confirm_execution("run_bash", cmd):
+                            resp = tool(cmd)
+                        else:
+                            resp = {"status": "cancelled", "message": "User cancelled execution"}
+                    elif name == "run_python":
+                        code = args.get("code", "")
+                        if confirm_execution("run_python", code):
+                            resp = tool(code)
+                        else:
+                            resp = {"status": "cancelled", "message": "User cancelled execution"}
                 conversation.append({
                     "role": "user",
                     "content": f"tool_result({json.dumps(resp)})"
