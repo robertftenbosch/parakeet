@@ -10,6 +10,7 @@ AI coding agent specialized in biotech and robotics applications.
 - **Code execution** - Run bash commands and Python code (with confirmation)
 - **File operations** - Read, list, and edit files
 - **Rich CLI** - Loading spinners, syntax highlighting, colored output
+- **Virtual environments** - Automatic venv creation with uv, conda, or venv
 
 ## Installation
 
@@ -70,24 +71,56 @@ On first run, Parakeet will:
 
 ```bash
 cd your-project
-parakeet init
+parakeet init              # Basic initialization
+parakeet init --venv       # With virtual environment
+parakeet init --venv -p 3.11  # With specific Python version
 ```
 
 Creates `.parakeet/` directory with:
 - `context.md` - Project-specific instructions for the AI
 - `config.json` - Project configuration
 
+With `--venv`, also creates a `.venv/` virtual environment using:
+1. **uv** (preferred) - Fast, modern Python package manager
+2. **conda** - If uv not available
+3. **venv** - Standard library fallback
+
+If no package manager is found, Parakeet will offer to install uv.
+
 ## Tools
 
 The agent has access to:
 
+### File & Code Operations
 | Tool | Description |
 |------|-------------|
 | `read_file_tool` | Read file contents |
 | `list_files_tool` | List directory contents |
 | `edit_file_tool` | Edit or create files |
+| `search_code_tool` | Search for patterns in files (regex) |
+| `sqlite_tool` | Query SQLite databases (write queries require confirmation) |
+
+### Environment Management
+| Tool | Description |
+|------|-------------|
+| `create_venv_tool` | Create virtual environment for a project |
+| `install_deps_tool` | Install dependencies (requires confirmation) |
+
+### Code Execution
+| Tool | Description |
+|------|-------------|
 | `run_bash_tool` | Execute bash commands (requires confirmation) |
 | `run_python_tool` | Execute Python code (requires confirmation) |
+
+### Bioinformatics Databases
+| Tool | Description |
+|------|-------------|
+| `kegg_tool` | Query KEGG for metabolic pathways, enzymes, reactions |
+| `pdb_tool` | Search RCSB PDB for protein structures |
+| `uniprot_tool` | Query UniProt for protein sequences and annotations |
+| `ncbi_tool` | Search NCBI databases (protein, nucleotide, gene) |
+| `ontology_tool` | Query biological ontologies (GO, CHEBI) |
+| `blast_tool` | Run BLAST sequence similarity searches |
 
 ## Configuration
 

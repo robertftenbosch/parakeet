@@ -9,13 +9,17 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "typer>=0.9.0",
     "rich>=13.0.0",
+    "requests>=2.31.0",
 ]
 
 [project.scripts]
 parakeet = "parakeet.main:app"
 
 [dependency-groups]
-dev = []
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=4.0.0",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["parakeet"]
@@ -23,3 +27,17 @@ packages = ["parakeet"]
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v"
+
+[tool.coverage.run]
+source = ["parakeet"]
+omit = ["tests/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+]

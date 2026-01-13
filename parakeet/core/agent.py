@@ -7,17 +7,40 @@ from ollama import Client
 
 from ..ui import console, print_tool, thinking_spinner
 from .config import load_project_context
-from .tools import TOOLS, TOOL_REGISTRY, DANGEROUS_TOOLS
+from .tools import TOOLS, TOOL_REGISTRY, DANGEROUS_TOOLS, CONDITIONAL_TOOLS
 
 SYSTEM_PROMPT = """You are a coding assistant specialized in biotech and robotics applications.
 
 ## Your Expertise
 
-### Bioinformatics
+### Bioinformatics - Databases & APIs
+You have direct access to major bioinformatics databases via tools:
+- **KEGG** (kegg_tool): Metabolic pathways, enzymes, reactions, compounds
+  - Find nitrogen metabolism pathways (map00910)
+  - Look up enzymes like nitrogenase (K02588-K02591)
+  - Explore reaction networks and compounds
+- **PDB** (pdb_tool): Protein structures from RCSB
+  - Search by keyword, organism, enzyme class
+  - Get structure details by PDB ID
+  - Sequence-based structure search
+- **UniProt** (uniprot_tool): Protein sequences and annotations
+  - Search proteins by name, function, organism
+  - Get detailed protein info including GO terms, EC numbers
+  - Retrieve FASTA sequences
+- **NCBI** (ncbi_tool): Genes, proteins, nucleotides, taxonomy
+  - Search across NCBI databases
+  - Fetch sequences in FASTA format
+- **Ontologies** (ontology_tool): GO, CHEBI, taxonomy terms
+  - Search Gene Ontology for biological processes
+  - Look up chemical entities in CHEBI
+- **BLAST** (blast_tool): Sequence similarity search
+  - Find homologous proteins/genes
+  - Note: BLAST searches take 30-60 seconds
+
+### Bioinformatics - Programming
 - BioPython for sequence analysis (SeqIO, Seq, SeqRecord)
 - FASTA/FASTQ/GenBank file parsing
 - Sequence alignment (pairwise, multiple sequence alignment)
-- BLAST searches and result parsing
 - Primer design and PCR analysis
 
 ### Robotics - ROS2
@@ -40,13 +63,15 @@ SYSTEM_PROMPT = """You are a coding assistant specialized in biotech and robotic
 - Point cloud processing (Open3D)
 
 ## Guidelines
+- Use bioinformatics tools to query databases directly
 - Use appropriate libraries for the domain
 - Follow ROS2 conventions for robotics code
 - Use BioPython idioms for bioinformatics
 - Write type hints for all functions
 - Include docstrings with examples
+- When creating Python projects, use create_venv_tool to set up virtual environments
 
-You have access to tools for file operations and code execution. Use them when needed to complete tasks.
+You have access to tools for file operations, code execution, and bioinformatics databases.
 """
 
 
@@ -164,14 +189,28 @@ def run_agent_loop(client: Client, model: str) -> None:
                     if tool_name not in TOOL_REGISTRY:
                         result = {"error": f"Unknown tool: {tool_name}"}
                     else:
-                        # Check if confirmation is needed
+                        # Determine if confirmation is needed
+                        needs_confirmation = False
+                        confirm_content = ""
+
                         if tool_name in DANGEROUS_TOOLS:
-                            # Format the content for confirmation
+                            needs_confirmation = True
                             if tool_name == "run_bash_tool":
                                 confirm_content = tool_args.get("command", "")
-                            else:  # run_python_tool
+                            elif tool_name == "run_python_tool":
                                 confirm_content = tool_args.get("code", "")
+                            elif tool_name == "install_deps_tool":
+                                confirm_content = f"Install dependencies in {tool_args.get('path', '.')}"
+                        elif tool_name in CONDITIONAL_TOOLS:
+                            # Check condition for conditional tools
+                            check_func = CONDITIONAL_TOOLS[tool_name]
+                            if tool_name == "sqlite_tool":
+                                query = tool_args.get("query", "")
+                                if check_func(query):
+                                    needs_confirmation = True
+                                    confirm_content = query
 
+                        if needs_confirmation:
                             if confirm_execution(tool_name, confirm_content):
                                 with thinking_spinner("Executing..."):
                                     func = TOOL_REGISTRY[tool_name]

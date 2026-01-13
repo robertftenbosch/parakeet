@@ -1,9 +1,11 @@
 """Tool definitions for the Parakeet agent."""
 
+import re
+import sqlite3
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from ..ui import console
 
@@ -16,22 +18,22 @@ def resolve_abs_path(path_str: str) -> Path:
     return path
 
 
-def read_file_tool(filename: str) -> dict[str, Any]:
+def read_file_tool(path: str) -> dict[str, Any]:
     """
     Read the contents of a file.
 
     Args:
-        filename: The path to the file to read
+        path: The path to the file to read
 
     Returns:
-        Dict with file_path and content
+        Dict with path and content
     """
-    full_path = resolve_abs_path(filename)
+    full_path = resolve_abs_path(path)
     console.print(f"  [dim]Reading:[/] {full_path}")
     with open(str(full_path), "r") as f:
         content = f.read()
     return {
-        "file_path": str(full_path),
+        "path": str(full_path),
         "content": content
     }
 
@@ -173,8 +175,198 @@ def run_python_tool(code: str) -> dict[str, Any]:
         }
 
 
+def search_code_tool(pattern: str, path: str = ".", file_pattern: Optional[str] = None) -> dict[str, Any]:
+    """
+    Search for a pattern in files using regex.
+
+    Args:
+        pattern: The regex pattern to search for
+        path: Directory to search in (default: current directory)
+        file_pattern: Optional glob pattern to filter files (e.g., "*.py")
+
+    Returns:
+        Dict with matches: list of {file, line, content}
+    """
+    search_path = resolve_abs_path(path)
+    console.print(f"  [dim]Searching:[/] {search_path} for '{pattern}'")
+    matches = []
+
+    # Determine files to search
+    if file_pattern:
+        files = search_path.rglob(file_pattern)
+    else:
+        files = search_path.rglob("*")
+
+    # Common binary/ignored extensions
+    ignore_ext = {'.pyc', '.pyo', '.so', '.dll', '.exe', '.bin', '.jpg', '.png', '.gif', '.pdf', '.ico', '.woff', '.woff2', '.ttf', '.eot'}
+    ignore_dirs = {'.git', '.venv', 'venv', '__pycache__', 'node_modules', '.parakeet', '.mypy_cache', '.pytest_cache'}
+
+    try:
+        regex = re.compile(pattern, re.IGNORECASE)
+    except re.error as e:
+        return {"error": f"Invalid regex: {e}"}
+
+    for file in files:
+        # Skip directories and ignored paths
+        if file.is_dir():
+            continue
+        if any(ignored in file.parts for ignored in ignore_dirs):
+            continue
+        if file.suffix.lower() in ignore_ext:
+            continue
+
+        try:
+            content = file.read_text(encoding="utf-8", errors="ignore")
+            for i, line in enumerate(content.splitlines(), 1):
+                if regex.search(line):
+                    matches.append({
+                        "file": str(file.relative_to(search_path)),
+                        "line": i,
+                        "content": line.strip()[:200]  # Truncate long lines
+                    })
+                    if len(matches) >= 50:  # Limit results
+                        return {"matches": matches, "truncated": True}
+        except Exception:
+            continue
+
+    return {"matches": matches, "truncated": False}
+
+
+def sqlite_tool(database: str, query: str, params: Optional[list[str]] = None) -> dict[str, Any]:
+    """
+    Execute a SQL query on a SQLite database.
+
+    Args:
+        database: Path to the SQLite database file
+        query: SQL query to execute
+        params: Optional list of parameters for parameterized queries
+
+    Returns:
+        Dict with columns, rows, and rows_affected
+    """
+    db_path = resolve_abs_path(database)
+    console.print(f"  [dim]SQLite:[/] {db_path}")
+    console.print(f"  [dim]Query:[/] {query[:100]}{'...' if len(query) > 100 else ''}")
+
+    if not db_path.exists():
+        return {"error": f"Database not found: {db_path}"}
+
+    try:
+        conn = sqlite3.connect(str(db_path))
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        if params:
+            cursor.execute(query, params)
+        else:
+            cursor.execute(query)
+
+        # Check if this is a SELECT or PRAGMA query
+        query_upper = query.strip().upper()
+        if query_upper.startswith(("SELECT", "PRAGMA")):
+            rows = cursor.fetchall()
+            columns = [desc[0] for desc in cursor.description] if cursor.description else []
+            result = {
+                "columns": columns,
+                "rows": [dict(row) for row in rows],
+                "row_count": len(rows)
+            }
+        else:
+            conn.commit()
+            result = {
+                "rows_affected": cursor.rowcount,
+                "last_rowid": cursor.lastrowid
+            }
+
+        conn.close()
+        return result
+
+    except sqlite3.Error as e:
+        return {"error": f"SQLite error: {e}"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def is_sqlite_write_query(query: str) -> bool:
+    """Check if a SQL query modifies data."""
+    query_upper = query.strip().upper()
+    write_keywords = ("INSERT", "UPDATE", "DELETE", "DROP", "CREATE", "ALTER", "REPLACE", "TRUNCATE")
+    return query_upper.startswith(write_keywords)
+
+
+def create_venv_tool(path: str, python_version: Optional[str] = None) -> dict[str, Any]:
+    """
+    Create a virtual environment for a Python project.
+
+    Args:
+        path: The project directory path where .venv will be created
+        python_version: Optional Python version (e.g., '3.11', '3.12')
+
+    Returns:
+        Dict with status, path, and manager used
+    """
+    from .environment import create_venv, detect_package_manager
+
+    project_path = resolve_abs_path(path)
+    console.print(f"  [dim]Creating venv:[/] {project_path}")
+
+    manager = detect_package_manager()
+    if manager:
+        console.print(f"  [dim]Using:[/] {manager}")
+
+    result = create_venv(project_path, python_version=python_version)
+    return result
+
+
+def install_deps_tool(path: str) -> dict[str, Any]:
+    """
+    Install dependencies for a Python project from pyproject.toml or requirements.txt.
+
+    Args:
+        path: The project directory path
+
+    Returns:
+        Dict with status and details
+    """
+    from .environment import install_dependencies, detect_package_manager
+
+    project_path = resolve_abs_path(path)
+    console.print(f"  [dim]Installing deps:[/] {project_path}")
+
+    manager = detect_package_manager()
+    if manager:
+        console.print(f"  [dim]Using:[/] {manager}")
+
+    result = install_dependencies(project_path)
+    return result
+
+
+# Import bioinformatics tools
+from .bio_tools import kegg_tool, pdb_tool, uniprot_tool, ncbi_tool, ontology_tool, blast_tool
+
 # Tools list for native Ollama tool calling
-TOOLS = [read_file_tool, list_files_tool, edit_file_tool, run_bash_tool, run_python_tool]
+TOOLS = [
+    # File operations
+    read_file_tool,
+    list_files_tool,
+    edit_file_tool,
+    search_code_tool,
+    # Database
+    sqlite_tool,
+    # Environment
+    create_venv_tool,
+    install_deps_tool,
+    # Code execution
+    run_bash_tool,
+    run_python_tool,
+    # Bioinformatics
+    kegg_tool,
+    pdb_tool,
+    uniprot_tool,
+    ncbi_tool,
+    ontology_tool,
+    blast_tool,
+]
 
 # Registry for looking up tools by name
 TOOL_REGISTRY = {
@@ -183,7 +375,20 @@ TOOL_REGISTRY = {
     "edit_file_tool": edit_file_tool,
     "run_bash_tool": run_bash_tool,
     "run_python_tool": run_python_tool,
+    "search_code_tool": search_code_tool,
+    "sqlite_tool": sqlite_tool,
+    "create_venv_tool": create_venv_tool,
+    "install_deps_tool": install_deps_tool,
+    "kegg_tool": kegg_tool,
+    "pdb_tool": pdb_tool,
+    "uniprot_tool": uniprot_tool,
+    "ncbi_tool": ncbi_tool,
+    "ontology_tool": ontology_tool,
+    "blast_tool": blast_tool,
 }
 
 # Tools that require user confirmation before execution
-DANGEROUS_TOOLS = {"run_bash_tool", "run_python_tool"}
+DANGEROUS_TOOLS = {"run_bash_tool", "run_python_tool", "install_deps_tool"}
+
+# Tools that need conditional confirmation (checked per-call)
+CONDITIONAL_TOOLS = {"sqlite_tool": is_sqlite_write_query}
