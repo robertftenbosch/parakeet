@@ -1,5 +1,4 @@
 import argparse
-import inspect
 import json
 import os
 import subprocess
@@ -114,8 +113,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-SYSTEM_PROMPT = """
-You are a coding assistant specialized in biotech and robotics applications.
+SYSTEM_PROMPT = """You are a coding assistant specialized in biotech and robotics applications.
 
 ## Your Expertise
 
@@ -152,13 +150,7 @@ You are a coding assistant specialized in biotech and robotics applications.
 - Write type hints for all functions
 - Include docstrings with examples
 
-## Tools
-
-{tool_list_repr}
-
-When you want to use a tool, reply with exactly one line in the format: 'tool: TOOL_NAME({{JSON_ARGS}})' and nothing else.
-Use compact single-line JSON with double quotes. After receiving a tool_result(...) message, continue the task.
-If no tool is needed, respond normally.
+You have access to tools for file operations and code execution. Use them when needed to complete tasks.
 """
 
 
@@ -177,12 +169,16 @@ def resolve_abs_path(path_str: str) -> Path:
 
 def read_file_tool(filename: str) -> Dict[str, Any]:
     """
-    Gets the full content of a file provided by the user.
-    :param filename: The name of the file to read.
-    :return: The full content of the file.
+    Read the contents of a file.
+
+    Args:
+        filename: The path to the file to read
+
+    Returns:
+        Dict with file_path and content
     """
     full_path = resolve_abs_path(filename)
-    print(full_path)
+    print(f"  Reading: {full_path}")
     with open(str(full_path), "r") as f:
         content = f.read()
     return {
@@ -190,13 +186,19 @@ def read_file_tool(filename: str) -> Dict[str, Any]:
         "content": content
     }
 
+
 def list_files_tool(path: str) -> Dict[str, Any]:
     """
-    Lists the files in a directory provided by the user.
-    :param path: The path to a directory to list files from.
-    :return: A list of files in the directory.
+    List files in a directory.
+
+    Args:
+        path: The path to the directory to list
+
+    Returns:
+        Dict with path and list of files
     """
     full_path = resolve_abs_path(path)
+    print(f"  Listing: {full_path}")
     all_files = []
     for item in full_path.iterdir():
         all_files.append({
@@ -208,16 +210,21 @@ def list_files_tool(path: str) -> Dict[str, Any]:
         "files": all_files
     }
 
+
 def edit_file_tool(path: str, old_str: str, new_str: str) -> Dict[str, Any]:
     """
-    Replaces first occurrence of old_str with new_str in file. If old_str is empty,
-    create/overwrite file with new_str.
-    :param path: The path to the file to edit.
-    :param old_str: The string to replace.
-    :param new_str: The string to replace with.
-    :return: A dictionary with the path to the file and the action taken.
+    Edit a file by replacing text. If old_str is empty, creates a new file.
+
+    Args:
+        path: The path to the file to edit
+        old_str: The string to replace (empty string to create new file)
+        new_str: The replacement string (or content for new file)
+
+    Returns:
+        Dict with path and action taken
     """
     full_path = resolve_abs_path(path)
+    print(f"  Editing: {full_path}")
     if old_str == "":
         full_path.write_text(new_str, encoding="utf-8")
         return {
@@ -256,9 +263,13 @@ def confirm_execution(tool_name: str, content: str) -> bool:
 
 def run_bash_tool(command: str) -> Dict[str, Any]:
     """
-    Executes a bash command. Requires user confirmation.
-    :param command: The bash command to execute.
-    :return: stdout, stderr, and return code.
+    Execute a bash command. Requires user confirmation.
+
+    Args:
+        command: The bash command to execute
+
+    Returns:
+        Dict with stdout, stderr, and return_code
     """
     try:
         result = subprocess.run(
@@ -288,9 +299,13 @@ def run_bash_tool(command: str) -> Dict[str, Any]:
 
 def run_python_tool(code: str) -> Dict[str, Any]:
     """
-    Executes Python code. Requires user confirmation.
-    :param code: The Python code to execute.
-    :return: stdout, stderr, and return code.
+    Execute Python code. Requires user confirmation.
+
+    Args:
+        code: The Python code to execute
+
+    Returns:
+        Dict with stdout, stderr, and return_code
     """
     try:
         with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
@@ -324,117 +339,111 @@ def run_python_tool(code: str) -> Dict[str, Any]:
         }
 
 
+# Tools list for native Ollama tool calling
+TOOLS = [read_file_tool, list_files_tool, edit_file_tool, run_bash_tool, run_python_tool]
+
+# Registry for looking up tools by name
 TOOL_REGISTRY = {
-    "read_file": read_file_tool,
-    "list_files": list_files_tool,
-    "edit_file": edit_file_tool,
-    "run_bash": run_bash_tool,
-    "run_python": run_python_tool,
+    "read_file_tool": read_file_tool,
+    "list_files_tool": list_files_tool,
+    "edit_file_tool": edit_file_tool,
+    "run_bash_tool": run_bash_tool,
+    "run_python_tool": run_python_tool,
 }
 
-def get_tool_str_representation(tool_name: str) -> str:
-    tool = TOOL_REGISTRY[tool_name]
-    return f"""
-    Name: {tool_name}
-    Description: {tool.__doc__}
-    Signature: {inspect.signature(tool)}
-    """
+# Tools that require user confirmation before execution
+DANGEROUS_TOOLS = {"run_bash_tool", "run_python_tool"}
 
-def get_full_system_prompt():
-    tool_str_repr = ""
-    for tool_name in TOOL_REGISTRY:
-        tool_str_repr += "TOOL\n===" + get_tool_str_representation(tool_name)
-        tool_str_repr += f"\n{'='*15}\n"
-    return SYSTEM_PROMPT.format(tool_list_repr=tool_str_repr)
 
-def extract_tool_invocations(text: str) -> List[Tuple[str, Dict[str, Any]]]:
-    """
-    Return list of (tool_name, args) requested in 'tool: name({...})' lines.
-    The parser expects single-line, compact JSON in parentheses.
-    """
-    invocations = []
-    for raw_line in text.splitlines():
-        line = raw_line.strip()
-        if not line.startswith("tool:"):
-            continue
-        try:
-            after = line[len("tool:"):].strip()
-            name, rest = after.split("(", 1)
-            name = name.strip()
-            if not rest.endswith(")"):
-                continue
-            json_str = rest[:-1].strip()
-            args = json.loads(json_str)
-            invocations.append((name, args))
-        except Exception:
-            continue
-    return invocations
-
-def execute_llm_call(client: Client, model: str, conversation: List[Dict[str, str]]):
+def execute_llm_call(client: Client, model: str, conversation: List[Dict[str, Any]], tools: List):
+    """Execute LLM call with native tool support."""
     response = client.chat(
         model=model,
         messages=conversation,
+        tools=tools,
     )
-    return response['message']['content']
+    return response
 
 
 def run_coding_agent_loop(client: Client, model: str):
     print(f"Using model: {model}")
-    print(get_full_system_prompt())
+    print(f"Tools: {', '.join(t.__name__ for t in TOOLS)}")
+    print()
+
     conversation = [{
         "role": "system",
-        "content": get_full_system_prompt()
+        "content": SYSTEM_PROMPT
     }]
+
     while True:
         try:
-            user_input = input(f"{YOU_COLOR}You:{RESET_COLOR}:")
+            user_input = input(f"{YOU_COLOR}You:{RESET_COLOR} ").strip()
         except (KeyboardInterrupt, EOFError):
+            print("\nGoodbye!")
             break
+
+        if not user_input:
+            continue
+
         conversation.append({
             "role": "user",
-            "content": user_input.strip()
+            "content": user_input
         })
+
+        # Agent loop - keep processing until no more tool calls
         while True:
-            assistant_response = execute_llm_call(client, model, conversation)
-            tool_invocations = extract_tool_invocations(assistant_response)
-            if not tool_invocations:
-                print(f"{ASSISTANT_COLOR}Assistant:{RESET_COLOR}: {assistant_response}")
+            response = execute_llm_call(client, model, conversation, TOOLS)
+            message = response.message
+
+            # Check if there are tool calls
+            if message.tool_calls:
+                # Add assistant message with tool calls to conversation
                 conversation.append({
                     "role": "assistant",
-                    "content": assistant_response
+                    "content": message.content or "",
+                    "tool_calls": message.tool_calls
+                })
+
+                for tool_call in message.tool_calls:
+                    tool_name = tool_call.function.name
+                    tool_args = tool_call.function.arguments
+
+                    print(f"{ASSISTANT_COLOR}Tool:{RESET_COLOR} {tool_name}({tool_args})")
+
+                    if tool_name not in TOOL_REGISTRY:
+                        result = {"error": f"Unknown tool: {tool_name}"}
+                    else:
+                        # Check if confirmation is needed
+                        if tool_name in DANGEROUS_TOOLS:
+                            # Format the content for confirmation
+                            if tool_name == "run_bash_tool":
+                                content = tool_args.get("command", "")
+                            else:  # run_python_tool
+                                content = tool_args.get("code", "")
+
+                            if confirm_execution(tool_name, content):
+                                func = TOOL_REGISTRY[tool_name]
+                                result = func(**tool_args)
+                            else:
+                                result = {"status": "cancelled", "message": "User cancelled execution"}
+                        else:
+                            func = TOOL_REGISTRY[tool_name]
+                            result = func(**tool_args)
+
+                    # Add tool result to conversation
+                    conversation.append({
+                        "role": "tool",
+                        "content": json.dumps(result)
+                    })
+            else:
+                # No tool calls - print response and break
+                if message.content:
+                    print(f"{ASSISTANT_COLOR}Assistant:{RESET_COLOR} {message.content}")
+                conversation.append({
+                    "role": "assistant",
+                    "content": message.content or ""
                 })
                 break
-            for name, args in tool_invocations:
-                if name not in TOOL_REGISTRY:
-                    resp = {"error": f"Unknown tool: {name}"}
-                else:
-                    tool = TOOL_REGISTRY[name]
-                    resp = ""
-                    print(name, args)
-                    if name == "read_file":
-                        resp = tool(args.get("filename", "."))
-                    elif name == "list_files":
-                        resp = tool(args.get("path", "."))
-                    elif name == "edit_file":
-                        resp = tool(args.get("path", "."),
-                                    args.get("old_str", ""),
-                                    args.get("new_str", ""))
-                    elif name == "run_bash":
-                        cmd = args.get("command", "")
-                        if confirm_execution("run_bash", cmd):
-                            resp = tool(cmd)
-                        else:
-                            resp = {"status": "cancelled", "message": "User cancelled execution"}
-                    elif name == "run_python":
-                        code = args.get("code", "")
-                        if confirm_execution("run_python", code):
-                            resp = tool(code)
-                        else:
-                            resp = {"status": "cancelled", "message": "User cancelled execution"}
-                conversation.append({
-                    "role": "user",
-                    "content": f"tool_result({json.dumps(resp)})"
-                })
 
 
 def main():
