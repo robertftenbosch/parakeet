@@ -9,7 +9,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 uv sync
 
 # Run the agent
-uv run python main.py
+uv run parakeet
+
+# Install globally (to ~/.local/bin)
+uv tool install .
 ```
 
 ## Environment Configuration

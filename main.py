@@ -296,8 +296,13 @@ def run_coding_agent_loop(client: Client, model: str):
                 })
 
 
-if __name__ == "__main__":
+def main():
+    """Entry point for the parakeet command."""
     args = parse_args()
     host, model = get_ollama_config(args)
     client = Client(host=host)
     run_coding_agent_loop(client, model)
+
+
+if __name__ == "__main__":
+    main()

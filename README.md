@@ -9,7 +9,31 @@ AI agent that uses LLM models to execute coding tasks with tool support.
 - Tool execution through LLM reasoning
 - Uses Ollama for local LLM inference
 
-## Setup
+## Installation (Linux Server)
+
+Install directly from GitHub:
+```bash
+# Install uv first (if not installed)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Install parakeet as a tool (installs to ~/.local/bin)
+uv tool install git+ssh://git@github.com/robertftenbosch/parakeet.git
+
+# Or with HTTPS:
+uv tool install git+https://github.com/robertftenbosch/parakeet.git
+```
+
+Make sure `~/.local/bin` is in your PATH:
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+Then run:
+```bash
+parakeet
+```
+
+## Development Setup
 
 1. Clone the repository
 
@@ -21,37 +45,28 @@ AI agent that uses LLM models to execute coding tasks with tool support.
    ```bash
    curl -LsSf https://astral.sh/uv/install.sh | sh
    ```
-   Or on Windows:
-   ```powershell
-   powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
-   ```
 
-4. Install dependencies and create virtual environment:
+4. Install dependencies:
    ```bash
    uv sync
    ```
 
-5. (Optional) Create a `.env` file to customize settings:
+5. Run from source:
    ```bash
-   cp .env.example .env
+   uv run parakeet
    ```
-
-   You can configure:
-   - `OLLAMA_HOST`: Ollama server URL (default: http://localhost:11434)
-   - `OLLAMA_MODEL`: Model to use (default: llama3.2)
 
 ## Usage
 
-Run the coding agent:
 ```bash
-uv run python main.py
+# First run: interactive model selection
+parakeet
+
+# Specify host and model directly
+parakeet --host http://192.168.1.100:11434 --model llama3.1
 ```
 
-Or activate the virtual environment first:
-```bash
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-python main.py
-```
+Configuration is saved to `~/.parakeet/config.json`.
 
 The agent will start an interactive loop where you can ask it to perform coding tasks. It has access to:
 - `read_file`: Read file contents
