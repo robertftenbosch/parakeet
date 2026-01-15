@@ -169,15 +169,23 @@ def confirm_execution(tool_name: str, content: str) -> bool:
         return False
 
 
-def stream_response(client: Client, model: str, conversation: list[dict[str, Any]], tools: list):
-    """Stream LLM response and collect content/tool calls."""
+def stream_response(client: Client, model: str, conversation: list[dict[str, Any]], tools: list, spinner_label: str = "Thinking..."):
+    """Stream LLM response and collect content/tool calls.
+
+    Args:
+        client: Ollama client
+        model: Model name
+        conversation: Conversation history
+        tools: Available tools
+        spinner_label: Custom label for the thinking spinner
+    """
     full_content = ""
     tool_calls = []
     first_chunk = True
     spinner_active = True
 
-    # Start spinner
-    spinner = thinking_spinner("Thinking...")
+    # Start spinner with custom label
+    spinner = thinking_spinner(spinner_label)
     spinner.__enter__()
 
     try:

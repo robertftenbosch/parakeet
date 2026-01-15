@@ -64,7 +64,11 @@ class MultiAgentCoordinator:
         Returns:
             Dict with task result
         """
-        console.print(f"\n[bold magenta]→ Delegating to {agent} agent:[/] {task[:80]}...")
+        # Show delegation message
+        console.print()
+        console.print(f"[bold magenta]→ Delegating to [cyan]{agent}[/] agent[/]")
+        console.print(f"  [dim]Task: {task[:100]}{'...' if len(task) > 100 else ''}[/]")
+        console.print()
 
         target_agent = self.get_agent(agent)
         if not target_agent:
@@ -90,6 +94,10 @@ class MultiAgentCoordinator:
         # Execute agent with its tools
         result = self._execute_agent_with_tools(agent, target_agent)
 
+        # Show completion message
+        console.print(f"[bold green]✓ {agent} agent completed[/]")
+        console.print()
+
         return {
             "agent": agent,
             "task": task,
@@ -110,14 +118,19 @@ class MultiAgentCoordinator:
         conversation = self.agent_conversations[agent_name]
         final_response = ""
 
+        # Create agent-specific spinner label
+        agent_display = agent.role  # e.g., "Coding Specialist"
+        spinner_label = f"{agent_display} working..."
+
         # Agent loop - keep processing until no more tool calls
         while True:
-            # Stream response
+            # Stream response with agent-specific spinner
             content, tool_calls = stream_response(
                 self.client,
                 self.model,
                 conversation,
-                agent.tools
+                agent.tools,
+                spinner_label=spinner_label
             )
 
             if tool_calls:
@@ -258,12 +271,13 @@ class MultiAgentCoordinator:
 
             # Orchestrator loop with delegation
             while True:
-                # Stream orchestrator response
+                # Stream orchestrator response with custom spinner
                 content, tool_calls = stream_response(
                     self.client,
                     self.model,
                     orchestrator_conversation,
-                    orchestrator_tools
+                    orchestrator_tools,
+                    spinner_label="Orchestrator planning..."
                 )
 
                 if tool_calls:
