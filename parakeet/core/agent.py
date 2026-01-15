@@ -8,6 +8,12 @@ from ollama import Client
 from ..ui import console, print_tool, thinking_spinner
 from .config import load_project_context
 from .tools import TOOLS, TOOL_REGISTRY, DANGEROUS_TOOLS, CONDITIONAL_TOOLS
+from .session import (
+    create_session_id,
+    save_session,
+    load_last_session,
+    trim_conversation,
+)
 
 SYSTEM_PROMPT = """You are a coding assistant specialized in biotech and robotics applications.
 
@@ -141,26 +147,57 @@ def stream_response(client: Client, model: str, conversation: list[dict[str, Any
     return full_content, tool_calls
 
 
-def run_agent_loop(client: Client, model: str) -> None:
+def run_agent_loop(client: Client, model: str, new_session: bool = False, multi_agent: bool = False) -> None:
     """Run the main agent interaction loop."""
     console.print(f"[bold green]Parakeet[/] v0.1.0")
     console.print(f"[dim]Model:[/] {model}")
-    console.print(f"[dim]Tools:[/] {', '.join(t.__name__ for t in TOOLS)}")
+
+    if not multi_agent:
+        console.print(f"[dim]Tools:[/] {', '.join(t.__name__ for t in TOOLS)}")
 
     # Check for project context
     project_context = load_project_context()
     if project_context:
         console.print(f"[dim]Project:[/] .parakeet/context.md loaded")
 
+    # Load or create session
+    session_id = None
+    conversation = None
+
+    if not new_session:
+        last_session = load_last_session()
+        if last_session:
+            session_id, conversation = last_session
+            console.print(f"[dim]Session:[/] {session_id} (resumed)")
+            # Count user messages
+            user_msg_count = sum(1 for m in conversation if m.get("role") == "user")
+            if user_msg_count > 0:
+                console.print(f"[dim]History:[/] {user_msg_count} previous messages loaded")
+
+    if not session_id:
+        session_id = create_session_id()
+        console.print(f"[dim]Session:[/] {session_id} (new)")
+
+    # Initialize conversation if not loaded
+    if not conversation:
+        system_prompt = build_system_prompt()
+        conversation = [{
+            "role": "system",
+            "content": system_prompt
+        }]
+
     console.print()
     console.print("[dim]Type your message or Ctrl+C to exit[/]")
     console.print()
 
-    system_prompt = build_system_prompt()
-    conversation = [{
-        "role": "system",
-        "content": system_prompt
-    }]
+    # Use multi-agent mode if requested
+    if multi_agent:
+        from .multi_agent import MultiAgentCoordinator
+
+        coordinator = MultiAgentCoordinator(client, model)
+        system_prompt = build_system_prompt()
+        coordinator.run_multi_agent_loop(system_prompt, conversation)
+        return
 
     while True:
         try:
@@ -212,6 +249,12 @@ def run_agent_loop(client: Client, model: str) -> None:
                                 confirm_content = tool_args.get("code", "")
                             elif tool_name == "install_deps_tool":
                                 confirm_content = f"Install dependencies in {tool_args.get('path', '.')}"
+                            elif tool_name == "smart_commit_tool":
+                                files = tool_args.get("files", ["all changes"])
+                                custom_msg = tool_args.get("custom_message")
+                                confirm_content = f"Commit {', '.join(files[:3])}"
+                                if custom_msg:
+                                    confirm_content += f"\nMessage: {custom_msg[:100]}"
                         elif tool_name in CONDITIONAL_TOOLS:
                             # Check condition for conditional tools
                             check_func = CONDITIONAL_TOOLS[tool_name]
@@ -220,6 +263,25 @@ def run_agent_loop(client: Client, model: str) -> None:
                                 if check_func(query):
                                     needs_confirmation = True
                                     confirm_content = query
+                            elif tool_name == "git_tool":
+                                action = tool_args.get("action", "")
+                                if check_func(action):
+                                    needs_confirmation = True
+                                    # Build confirmation content based on action
+                                    if action == "commit":
+                                        confirm_content = f"git commit -m \"{tool_args.get('message', '')[:100]}\""
+                                    elif action == "push":
+                                        confirm_content = f"git push {tool_args.get('remote', 'origin')} {tool_args.get('branch', '')}"
+                                    elif action == "pull":
+                                        confirm_content = f"git pull {tool_args.get('remote', 'origin')} {tool_args.get('branch', '')}"
+                                    elif action == "merge":
+                                        confirm_content = f"git merge {tool_args.get('branch', '')}"
+                                    elif action == "checkout":
+                                        confirm_content = f"git checkout {tool_args.get('branch', '')}"
+                                    elif action == "reset":
+                                        confirm_content = f"git reset --soft HEAD"
+                                    else:
+                                        confirm_content = f"git {action}"
 
                         if needs_confirmation:
                             if confirm_execution(tool_name, confirm_content):
@@ -244,3 +306,7 @@ def run_agent_loop(client: Client, model: str) -> None:
                     "content": content
                 })
                 break
+
+        # After completing the exchange, trim and save conversation
+        conversation = trim_conversation(conversation)
+        save_session(session_id, conversation)

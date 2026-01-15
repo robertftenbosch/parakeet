@@ -7,6 +7,7 @@ import typer
 from .cli.chat import chat
 from .cli.config_cmd import config
 from .cli.init_cmd import init
+from .cli.sessions_cmd import app as sessions_app
 
 app = typer.Typer(
     name="parakeet",
@@ -18,6 +19,7 @@ app = typer.Typer(
 app.command(name="chat")(chat)
 app.command(name="config")(config)
 app.command(name="init")(init)
+app.add_typer(sessions_app, name="sessions")
 
 
 @app.callback(invoke_without_command=True)
@@ -26,6 +28,8 @@ def main(
     version: bool = typer.Option(False, "--version", "-v", help="Show version"),
     host: Optional[str] = typer.Option(None, "--host", "-h", help="Ollama server URL"),
     model: Optional[str] = typer.Option(None, "--model", "-m", help="Model name to use"),
+    new: bool = typer.Option(False, "--new", "-n", help="Start a new session (don't resume last)"),
+    multi_agent: bool = typer.Option(False, "--multi-agent", help="Enable multi-agent mode with specialist agents"),
 ) -> None:
     """AI coding agent for biotech and robotics."""
     if version:
@@ -35,7 +39,7 @@ def main(
 
     if ctx.invoked_subcommand is None:
         # Default to chat command
-        chat(host=host, model=model)
+        chat(host=host, model=model, new=new, multi_agent=multi_agent)
 
 
 if __name__ == "__main__":

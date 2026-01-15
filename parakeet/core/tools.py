@@ -97,24 +97,65 @@ def edit_file_tool(path: str, old_str: str, new_str: str) -> dict[str, Any]:
     }
 
 
-def run_bash_tool(command: str) -> dict[str, Any]:
+def run_bash_tool(
+    command: str,
+    timeout: Optional[float] = None,
+    cwd: Optional[str] = None,
+    env: Optional[dict[str, str]] = None,
+    session_id: Optional[str] = None
+) -> dict[str, Any]:
     """
     Execute a bash command. Requires user confirmation.
 
     Args:
         command: The bash command to execute
+        timeout: Timeout in seconds (default: 60 for one-off, 300 for sessions)
+        cwd: Working directory (default: current directory)
+        env: Environment variables to set (merged with current env)
+        session_id: Optional session ID for persistent shell (maintains state between commands)
 
     Returns:
-        Dict with stdout, stderr, and return_code
+        Dict with stdout, stderr, return_code, and optionally session_id
     """
+    from .shell_session import get_session, create_session
+
+    # Handle persistent shell sessions
+    if session_id:
+        session = get_session(session_id)
+
+        # Create new session if it doesn't exist
+        if not session:
+            session = create_session(session_id, cwd=cwd, env=env)
+            console.print(f"  [dim]Created shell session:[/] {session_id}")
+
+        # Execute in session
+        timeout_val = timeout if timeout is not None else 300.0
+        result = session.execute(command, timeout=timeout_val)
+        result["session_id"] = session_id
+        return result
+
+    # One-off command execution (original behavior)
+    timeout_val = timeout if timeout is not None else 60.0
+
     try:
+        # Build environment
+        exec_env = None
+        if env:
+            import os
+            exec_env = os.environ.copy()
+            exec_env.update(env)
+
+        # Determine working directory
+        exec_cwd = resolve_abs_path(cwd) if cwd else Path.cwd()
+
         result = subprocess.run(
             command,
             shell=True,
             capture_output=True,
             text=True,
-            timeout=60,
-            cwd=Path.cwd()
+            timeout=timeout_val,
+            cwd=str(exec_cwd),
+            env=exec_env
         )
         return {
             "stdout": result.stdout,
@@ -123,7 +164,7 @@ def run_bash_tool(command: str) -> dict[str, Any]:
         }
     except subprocess.TimeoutExpired:
         return {
-            "error": "Command timed out after 60 seconds",
+            "error": f"Command timed out after {timeout_val} seconds",
             "return_code": -1
         }
     except Exception as e:
@@ -131,6 +172,70 @@ def run_bash_tool(command: str) -> dict[str, Any]:
             "error": str(e),
             "return_code": -1
         }
+
+
+def manage_shell_session_tool(action: str, session_id: Optional[str] = None) -> dict[str, Any]:
+    """
+    Manage persistent shell sessions.
+
+    Args:
+        action: Action to perform - 'list', 'terminate', 'terminate_all', or 'cleanup'
+        session_id: Session ID (required for 'terminate' action)
+
+    Returns:
+        Dict with action result
+    """
+    from .shell_session import (
+        list_sessions,
+        terminate_session,
+        terminate_all_sessions,
+        cleanup_dead_sessions
+    )
+
+    console.print(f"  [dim]Shell session action:[/] {action}")
+
+    if action == "list":
+        sessions = list_sessions()
+        return {
+            "action": "list",
+            "sessions": sessions,
+            "count": len(sessions)
+        }
+
+    elif action == "terminate":
+        if not session_id:
+            return {"error": "session_id required for terminate action"}
+
+        success = terminate_session(session_id)
+        if success:
+            return {
+                "action": "terminate",
+                "session_id": session_id,
+                "status": "terminated"
+            }
+        else:
+            return {
+                "action": "terminate",
+                "session_id": session_id,
+                "error": "Session not found"
+            }
+
+    elif action == "terminate_all":
+        count = terminate_all_sessions()
+        return {
+            "action": "terminate_all",
+            "terminated_count": count
+        }
+
+    elif action == "cleanup":
+        count = cleanup_dead_sessions()
+        return {
+            "action": "cleanup",
+            "cleaned_count": count
+        }
+
+    else:
+        return {"error": f"Unknown action: {action}"}
 
 
 def run_python_tool(code: str) -> dict[str, Any]:
@@ -294,6 +399,15 @@ def is_sqlite_write_query(query: str) -> bool:
     return query_upper.startswith(write_keywords)
 
 
+def is_git_dangerous_action(action: str) -> bool:
+    """Check if a git action requires confirmation."""
+    # Safe actions that don't need confirmation
+    safe_actions = {"status", "log", "diff", "branch", "remote"}
+
+    # Everything else needs confirmation (commit, push, pull, merge, reset, checkout, stash, add)
+    return action not in safe_actions
+
+
 def create_venv_tool(path: str, python_version: Optional[str] = None) -> dict[str, Any]:
     """
     Create a virtual environment for a Python project.
@@ -439,6 +553,169 @@ def find_alternatives_tool(
 
     return find_alternative_enzymes(ec_number, source_organism, targets)
 
+
+def git_tool(
+    action: str,
+    files: Optional[list[str]] = None,
+    message: Optional[str] = None,
+    branch: Optional[str] = None,
+    remote: Optional[str] = None,
+    limit: Optional[int] = None,
+    staged: bool = False,
+    create: bool = False,
+    force: bool = False,
+    cwd: Optional[str] = None
+) -> dict[str, Any]:
+    """
+    Execute git operations.
+
+    Args:
+        action: Git action - 'status', 'log', 'diff', 'branch', 'add', 'commit',
+                'push', 'pull', 'checkout', 'stash', 'merge', 'reset', 'remote'
+        files: Files to add (for 'add' action)
+        message: Commit or stash message
+        branch: Branch name (for checkout, merge, push, pull)
+        remote: Remote name (default: 'origin')
+        limit: Number of commits for log (default: 10)
+        staged: Show staged changes for diff
+        create: Create new branch for checkout
+        force: Force operation (push --force, etc.)
+        cwd: Working directory
+
+    Returns:
+        Dict with operation result
+    """
+    from .git_operations import (
+        git_status, git_log, git_diff, git_branch, git_add,
+        git_commit, git_push, git_pull, git_checkout, git_stash,
+        git_merge, git_reset, git_remote
+    )
+
+    console.print(f"  [dim]Git:[/] {action}")
+
+    work_dir = resolve_abs_path(cwd) if cwd else Path.cwd()
+
+    # Safe operations (no confirmation needed)
+    if action == "status":
+        return git_status(work_dir)
+    elif action == "log":
+        return git_log(work_dir, limit=limit or 10)
+    elif action == "diff":
+        return git_diff(work_dir, staged=staged)
+    elif action == "branch":
+        return git_branch(work_dir, list_all=False)
+    elif action == "remote":
+        return git_remote("show", cwd=work_dir)
+
+    # Potentially dangerous operations (will be confirmed by agent system)
+    elif action == "add":
+        if not files:
+            return {"error": "files parameter required for 'add' action", "success": False}
+        return git_add(files, work_dir)
+    elif action == "commit":
+        if not message:
+            return {"error": "message parameter required for 'commit' action", "success": False}
+        return git_commit(message, work_dir)
+    elif action == "push":
+        return git_push(remote or "origin", branch, work_dir, force)
+    elif action == "pull":
+        return git_pull(remote or "origin", branch, work_dir)
+    elif action == "checkout":
+        if not branch:
+            return {"error": "branch parameter required for 'checkout' action", "success": False}
+        return git_checkout(branch, work_dir, create)
+    elif action == "stash":
+        stash_action = "push"  # Default stash action
+        return git_stash(stash_action, message, work_dir)
+    elif action == "merge":
+        if not branch:
+            return {"error": "branch parameter required for 'merge' action", "success": False}
+        return git_merge(branch, work_dir)
+    elif action == "reset":
+        return git_reset("soft", "HEAD", work_dir)
+    else:
+        return {"error": f"Unknown git action: {action}", "success": False}
+
+
+def smart_commit_tool(
+    files: Optional[list[str]] = None,
+    auto_message: bool = True,
+    custom_message: Optional[str] = None,
+    cwd: Optional[str] = None
+) -> dict[str, Any]:
+    """
+    Create an intelligent git commit with auto-generated message.
+
+    This tool analyzes changes and creates appropriate commit messages.
+    Requires user confirmation before committing.
+
+    Args:
+        files: Files to stage and commit (default: all changes)
+        auto_message: Generate commit message from changes (default: True)
+        custom_message: Custom commit message (overrides auto_message)
+        cwd: Working directory
+
+    Returns:
+        Dict with commit result including message used
+    """
+    from .git_operations import git_status, git_diff, git_add, git_commit
+
+    console.print("  [dim]Smart Commit:[/] Analyzing changes...")
+
+    work_dir = resolve_abs_path(cwd) if cwd else Path.cwd()
+
+    # Get status to see what changed
+    status_result = git_status(work_dir, short=True)
+    if not status_result.get("success"):
+        return status_result
+
+    changes = status_result.get("changes", [])
+    if not changes:
+        return {"error": "No changes to commit", "success": False}
+
+    # Stage files
+    files_to_add = files or ["."]
+    add_result = git_add(files_to_add, work_dir)
+    if not add_result.get("success"):
+        return add_result
+
+    # Generate or use commit message
+    if custom_message:
+        commit_message = custom_message
+    elif auto_message:
+        # Get diff to analyze changes
+        diff_result = git_diff(work_dir, staged=True)
+
+        # Simple message generation based on file changes
+        modified = [c for c in changes if c.startswith(" M") or c.startswith("M")]
+        added = [c for c in changes if c.startswith("A") or c.startswith("??")]
+        deleted = [c for c in changes if c.startswith("D")]
+
+        # Build message
+        parts = []
+        if added:
+            parts.append(f"Add {len(added)} file(s)")
+        if modified:
+            parts.append(f"Update {len(modified)} file(s)")
+        if deleted:
+            parts.append(f"Remove {len(deleted)} file(s)")
+
+        commit_message = ", ".join(parts) if parts else "Update files"
+
+        # Add file details if reasonable number
+        if len(changes) <= 5:
+            file_list = [c.split()[-1] for c in changes]
+            commit_message += f"\n\n- " + "\n- ".join(file_list)
+    else:
+        commit_message = "Update files"
+
+    # Create commit
+    commit_result = git_commit(commit_message, work_dir)
+    commit_result["commit_message"] = commit_message
+    commit_result["files_staged"] = len(files_to_add)
+
+    return commit_result
+
 # Tools list for native Ollama tool calling
 TOOLS = [
     # File operations
@@ -453,7 +730,11 @@ TOOLS = [
     install_deps_tool,
     # Code execution
     run_bash_tool,
+    manage_shell_session_tool,
     run_python_tool,
+    # Git operations
+    git_tool,
+    smart_commit_tool,
     # Bioinformatics
     kegg_tool,
     pdb_tool,
@@ -473,11 +754,14 @@ TOOL_REGISTRY = {
     "list_files_tool": list_files_tool,
     "edit_file_tool": edit_file_tool,
     "run_bash_tool": run_bash_tool,
+    "manage_shell_session_tool": manage_shell_session_tool,
     "run_python_tool": run_python_tool,
     "search_code_tool": search_code_tool,
     "sqlite_tool": sqlite_tool,
     "create_venv_tool": create_venv_tool,
     "install_deps_tool": install_deps_tool,
+    "git_tool": git_tool,
+    "smart_commit_tool": smart_commit_tool,
     "kegg_tool": kegg_tool,
     "pdb_tool": pdb_tool,
     "uniprot_tool": uniprot_tool,
@@ -490,7 +774,10 @@ TOOL_REGISTRY = {
 }
 
 # Tools that require user confirmation before execution
-DANGEROUS_TOOLS = {"run_bash_tool", "run_python_tool", "install_deps_tool"}
+DANGEROUS_TOOLS = {"run_bash_tool", "run_python_tool", "install_deps_tool", "smart_commit_tool"}
 
 # Tools that need conditional confirmation (checked per-call)
-CONDITIONAL_TOOLS = {"sqlite_tool": is_sqlite_write_query}
+CONDITIONAL_TOOLS = {
+    "sqlite_tool": is_sqlite_write_query,
+    "git_tool": is_git_dangerous_action,
+}
