@@ -102,7 +102,8 @@ def run_bash_tool(
     timeout: Optional[float] = None,
     cwd: Optional[str] = None,
     env: Optional[dict[str, str]] = None,
-    session_id: Optional[str] = None
+    session_id: Optional[str] = None,
+    sudo_password: Optional[str] = None
 ) -> dict[str, Any]:
     """
     Execute a bash command. Requires user confirmation.
@@ -113,11 +114,18 @@ def run_bash_tool(
         cwd: Working directory (default: current directory)
         env: Environment variables to set (merged with current env)
         session_id: Optional session ID for persistent shell (maintains state between commands)
+        sudo_password: Sudo password for commands requiring sudo (internal, passed by confirmation)
 
     Returns:
         Dict with stdout, stderr, return_code, and optionally session_id
     """
     from .shell_session import get_session, create_session
+
+    # Handle sudo password
+    if sudo_password and "sudo" in command.lower():
+        # Use echo to pipe password to sudo -S
+        # -S tells sudo to read password from stdin
+        command = f"echo '{sudo_password}' | sudo -S {command.replace('sudo', '', 1).strip()}"
 
     # Handle persistent shell sessions
     if session_id:

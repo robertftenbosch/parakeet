@@ -156,17 +156,53 @@ def build_system_prompt() -> str:
     return prompt
 
 
-def confirm_execution(tool_name: str, content: str) -> bool:
-    """Ask user to confirm before executing code."""
+def confirm_execution(tool_name: str, content: str) -> tuple[bool, Optional[str]]:
+    """Ask user to confirm before executing code.
+
+    Returns:
+        Tuple of (approved, sudo_password)
+        - approved: Whether execution is approved
+        - sudo_password: Sudo password if provided, None otherwise
+    """
     console.print(f"\n[bold red]Warning:[/] {tool_name} wants to execute:")
     console.print("[dim]" + "─" * 50 + "[/]")
     console.print(content)
     console.print("[dim]" + "─" * 50 + "[/]")
+
+    # Check if command contains sudo
+    has_sudo = tool_name == "run_bash_tool" and "sudo" in content.lower()
+
     try:
-        response = console.input("[bold red]Execute? [y/N]:[/] ").strip().lower()
-        return response in ('y', 'yes', 'j', 'ja')
+        if has_sudo:
+            console.print("\n[bold yellow]This command uses sudo.[/]")
+            console.print("[bold red]Options:[/]")
+            console.print("  [cyan]1.[/] Yes, execute (no sudo password)")
+            console.print("  [cyan]2.[/] Yes, with sudo password")
+            console.print("  [cyan]3.[/] No, cancel")
+
+            choice = console.input("\n[bold red]Choose option [1/2/3]:[/] ").strip()
+
+            if choice == "1":
+                return True, None
+            elif choice == "2":
+                # Ask for sudo password
+                import getpass
+                try:
+                    sudo_password = getpass.getpass("[bold red]Enter sudo password:[/] ")
+                    return True, sudo_password
+                except (KeyboardInterrupt, EOFError):
+                    console.print("\n[yellow]Cancelled.[/]")
+                    return False, None
+            else:
+                return False, None
+        else:
+            # Normal confirmation without sudo
+            response = console.input("[bold red]Execute? [y/N]:[/] ").strip().lower()
+            approved = response in ('y', 'yes', 'j', 'ja')
+            return approved, None
+
     except (KeyboardInterrupt, EOFError):
-        return False
+        return False, None
 
 
 def stream_response(client: Client, model: str, conversation: list[dict[str, Any]], tools: list, spinner_label: str = "Thinking..."):
@@ -365,9 +401,13 @@ def run_agent_loop(client: Client, model: str, new_session: bool = False, multi_
                                         confirm_content = f"git {action}"
 
                         if needs_confirmation:
-                            if confirm_execution(tool_name, confirm_content):
+                            approved, sudo_password = confirm_execution(tool_name, confirm_content)
+                            if approved:
                                 with thinking_spinner("Executing..."):
                                     func = TOOL_REGISTRY[tool_name]
+                                    # Pass sudo_password to run_bash_tool if provided
+                                    if tool_name == "run_bash_tool" and sudo_password:
+                                        tool_args["sudo_password"] = sudo_password
                                     result = func(**tool_args)
                             else:
                                 result = {"status": "cancelled", "message": "User cancelled execution"}

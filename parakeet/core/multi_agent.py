@@ -198,9 +198,13 @@ class MultiAgentCoordinator:
                                         confirm_content = f"git {action}"
 
                         if needs_confirmation:
-                            if confirm_execution(tool_name, confirm_content):
+                            approved, sudo_password = confirm_execution(tool_name, confirm_content)
+                            if approved:
                                 with thinking_spinner("Executing..."):
                                     func = TOOL_REGISTRY[tool_name]
+                                    # Pass sudo_password to run_bash_tool if provided
+                                    if tool_name == "run_bash_tool" and sudo_password:
+                                        tool_args["sudo_password"] = sudo_password
                                     result = func(**tool_args)
                             else:
                                 result = {"status": "cancelled", "message": "User cancelled execution"}
