@@ -174,28 +174,48 @@ def stream_response(client: Client, model: str, conversation: list[dict[str, Any
     full_content = ""
     tool_calls = []
     first_chunk = True
+    spinner_active = True
 
-    for chunk in client.chat(
-        model=model,
-        messages=conversation,
-        tools=tools,
-        stream=True,
-    ):
-        # Handle content streaming
-        if chunk.message.content:
-            if first_chunk:
-                console.print("[bold blue]Assistant:[/] ", end="")
-                first_chunk = False
-            console.print(chunk.message.content, end="", highlight=False)
-            full_content += chunk.message.content
+    # Start spinner
+    spinner = thinking_spinner("Thinking...")
+    spinner.__enter__()
 
-        # Collect tool calls
-        if chunk.message.tool_calls:
-            tool_calls.extend(chunk.message.tool_calls)
+    try:
+        for chunk in client.chat(
+            model=model,
+            messages=conversation,
+            tools=tools,
+            stream=True,
+        ):
+            # Handle content streaming
+            if chunk.message.content:
+                if first_chunk:
+                    # Stop spinner on first content
+                    if spinner_active:
+                        spinner.__exit__(None, None, None)
+                        spinner_active = False
+                    console.print("[bold blue]Assistant:[/] ", end="")
+                    first_chunk = False
+                console.print(chunk.message.content, end="", highlight=False)
+                full_content += chunk.message.content
 
-    # Print newline if we streamed content
-    if full_content:
-        console.print()
+            # Collect tool calls
+            if chunk.message.tool_calls:
+                if first_chunk and spinner_active:
+                    # Stop spinner if tool calls come first
+                    spinner.__exit__(None, None, None)
+                    spinner_active = False
+                    first_chunk = False
+                tool_calls.extend(chunk.message.tool_calls)
+
+        # Print newline if we streamed content
+        if full_content:
+            console.print()
+
+    finally:
+        # Ensure spinner is stopped
+        if spinner_active:
+            spinner.__exit__(None, None, None)
 
     return full_content, tool_calls
 
