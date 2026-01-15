@@ -1,7 +1,7 @@
 """Agent loop for Parakeet."""
 
 import json
-from typing import Any
+from typing import Any, Optional
 
 from ollama import Client
 
