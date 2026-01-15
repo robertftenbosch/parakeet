@@ -349,10 +349,22 @@ def run_agent_loop(client: Client, model: str, new_session: bool = False, multi_
                     tool_name = tool_call.function.name
                     tool_args = tool_call.function.arguments
 
+                    # Ensure tool_args is a dict
+                    if not isinstance(tool_args, dict):
+                        console.print(f"[yellow]Warning: Tool arguments are not a dict, got {type(tool_args)}[/]")
+                        tool_args = {}
+
                     print_tool(tool_name, tool_args)
 
                     if tool_name not in TOOL_REGISTRY:
-                        result = {"error": f"Unknown tool: {tool_name}"}
+                        # Unknown tool - provide helpful error
+                        available_tools = ", ".join(sorted(TOOL_REGISTRY.keys())[:10])
+                        result = {
+                            "error": f"Unknown tool: {tool_name}",
+                            "message": f"Tool '{tool_name}' is not available. Try using one of the available tools.",
+                            "available_tools_sample": available_tools
+                        }
+                        console.print(f"[red]Error: Unknown tool '{tool_name}'[/]")
                     else:
                         # Determine if confirmation is needed
                         needs_confirmation = False

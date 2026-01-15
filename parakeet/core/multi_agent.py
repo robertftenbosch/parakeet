@@ -146,11 +146,23 @@ class MultiAgentCoordinator:
                     tool_name = tool_call.function.name
                     tool_args = tool_call.function.arguments
 
+                    # Ensure tool_args is a dict
+                    if not isinstance(tool_args, dict):
+                        console.print(f"  [yellow][{agent_name}] Warning: Tool arguments are not a dict, got {type(tool_args)}[/]")
+                        tool_args = {}
+
                     console.print(f"  [dim][{agent_name}][/] ", end="")
                     print_tool(tool_name, tool_args)
 
                     if tool_name not in TOOL_REGISTRY:
-                        result = {"error": f"Unknown tool: {tool_name}"}
+                        # Unknown tool - provide helpful error
+                        available_tools = ", ".join(sorted(TOOL_REGISTRY.keys())[:10])
+                        result = {
+                            "error": f"Unknown tool: {tool_name}",
+                            "message": f"Tool '{tool_name}' is not available. Try using one of the available tools.",
+                            "available_tools_sample": available_tools
+                        }
+                        console.print(f"  [red][{agent_name}] Error: Unknown tool '{tool_name}'[/]")
                     else:
                         # Handle confirmations same as main agent
                         needs_confirmation = False
