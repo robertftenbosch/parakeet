@@ -4,6 +4,7 @@ from ollama import Client
 
 from .base import Agent, AgentCapability
 from ..tools import (
+    propose_plan_tool,
     read_file_tool,
     edit_file_tool,
     list_files_tool,
@@ -30,6 +31,7 @@ class CodingAgent(Agent):
                 AgentCapability.SHELL_EXECUTION,
             ],
             tools=[
+                propose_plan_tool,
                 read_file_tool,
                 edit_file_tool,
                 list_files_tool,
@@ -57,13 +59,15 @@ You specialize in:
 - Following best practices and design patterns
 
 ## Your Approach
-1. Understand the requirements clearly
-2. Read existing code to understand patterns and style
-3. Implement solutions that match the codebase style
-4. Write type hints and docstrings
-5. Test your implementations when possible
+1. For complex tasks, first propose a plan using `propose_plan_tool`
+2. Understand the requirements clearly
+3. Read existing code to understand patterns and style
+4. Implement solutions that match the codebase style
+5. Write type hints and docstrings
+6. Test your implementations when possible
 
 ## Tools Available
+- Planning: propose_plan_tool
 - File operations: read_file_tool, edit_file_tool, list_files_tool
 - Code execution: run_bash_tool, run_python_tool
 - Environment: create_venv_tool, install_deps_tool

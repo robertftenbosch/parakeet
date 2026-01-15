@@ -13,7 +13,7 @@ from .agents import (
     BioinformaticsAgent,
 )
 from .agents.base import AgentTask, AgentResult
-from .tools import TOOL_REGISTRY, DANGEROUS_TOOLS, CONDITIONAL_TOOLS
+from .tools import TOOL_REGISTRY, DANGEROUS_TOOLS, CONDITIONAL_TOOLS, propose_plan_tool
 from .agent import confirm_execution, stream_response
 
 
@@ -238,8 +238,8 @@ class MultiAgentCoordinator:
             "content": orchestrator_system
         }]
 
-        # Add delegate_task tool to orchestrator's tools dynamically
-        orchestrator_tools = [self.delegate_task_tool]
+        # Add orchestrator-specific tools dynamically
+        orchestrator_tools = [propose_plan_tool, self.delegate_task_tool]
 
         while True:
             try:

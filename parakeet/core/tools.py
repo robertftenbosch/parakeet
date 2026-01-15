@@ -637,6 +637,60 @@ def git_tool(
         return {"error": f"Unknown git action: {action}", "success": False}
 
 
+def propose_plan_tool(
+    plan_title: str,
+    steps: list[dict[str, str]]
+) -> dict[str, Any]:
+    """
+    Propose a plan to the user and let them select which steps to execute.
+
+    This tool allows agents to present a multi-step plan and get user approval
+    for which steps should be executed. User can select specific steps via checkboxes.
+
+    Args:
+        plan_title: Title/description of the overall plan
+        steps: List of step dicts, each containing:
+               - 'description': What the step does (required)
+               - 'agent': Which agent will execute (optional, for multi-agent mode)
+               - 'rationale': Why this step is needed (optional)
+
+    Returns:
+        Dict with:
+        - approved: Boolean, whether plan was approved
+        - selected_steps: List of step indices that were selected
+        - original_steps: The original plan steps
+    """
+    from ..ui import select_plan_steps
+
+    console.print("\n[bold yellow]📋 Plan Proposal[/]")
+
+    # Validate steps
+    if not steps:
+        return {
+            "approved": False,
+            "error": "No steps provided in plan",
+            "selected_steps": []
+        }
+
+    # Get user selection
+    selected_indices = select_plan_steps(plan_title, steps)
+
+    if not selected_indices:
+        return {
+            "approved": False,
+            "selected_steps": [],
+            "original_steps": steps,
+            "message": "Plan cancelled by user"
+        }
+
+    return {
+        "approved": True,
+        "selected_steps": selected_indices,
+        "original_steps": steps,
+        "message": f"User approved {len(selected_indices)} of {len(steps)} steps"
+    }
+
+
 def smart_commit_tool(
     files: Optional[list[str]] = None,
     auto_message: bool = True,
@@ -718,6 +772,8 @@ def smart_commit_tool(
 
 # Tools list for native Ollama tool calling
 TOOLS = [
+    # Planning
+    propose_plan_tool,
     # File operations
     read_file_tool,
     list_files_tool,
@@ -750,6 +806,7 @@ TOOLS = [
 
 # Registry for looking up tools by name
 TOOL_REGISTRY = {
+    "propose_plan_tool": propose_plan_tool,
     "read_file_tool": read_file_tool,
     "list_files_tool": list_files_tool,
     "edit_file_tool": edit_file_tool,
